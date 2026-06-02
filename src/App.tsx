@@ -581,7 +581,7 @@ export default function App() {
       <header className="top-bar glass-panel">
         <div className="top-bar-left">
           <div className="app-title">
-            <span>ATS Increaser</span>
+            <span>Invisible Embedder</span>
           </div>
           {fileName && <span className="file-name">{fileName}</span>}
         </div>

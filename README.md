@@ -1,4 +1,4 @@
-# ATS Increaser
+# Invisible Embedder
 
 A fully client-side PDF editor for adding ATS-focused text to a PDF while keeping the visual document clean.
 
