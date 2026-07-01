@@ -13,12 +13,13 @@
     "@vitejs/plugin-react": "^5.1.1",
     "lucide-react": "^0.556.0",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^5.4.394",
+    "pdfjs-dist": "5.4.394",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "tailwindcss": "^4.1.17"
   },
   "devDependencies": {
+    "@types/node": "^26.0.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "typescript": "^5.9.3",

@@ -118,6 +118,10 @@ export const PdfPageView = forwardRef<HTMLElement, PdfPageViewProps>(
             height: viewport.height,
           });
 
+          // Ensure background is white before rendering
+          context.fillStyle = "#ffffff";
+          context.fillRect(0, 0, canvas.width, canvas.height);
+
           renderTask = page.render({ canvas, canvasContext: context, viewport });
           textLayerContainer.replaceChildren();
           textLayerContainer.style.setProperty(

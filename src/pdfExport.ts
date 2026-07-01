@@ -209,6 +209,10 @@ async function renderPageForExport(page: PDFPageProxy) {
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
 
+  // Ensure background is white before rendering
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
   await page.render({ canvas, canvasContext: context, viewport }).promise;
 
   return {
