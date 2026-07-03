@@ -53,12 +53,6 @@ type TextChunk = {
   rotate: number;
 };
 
-type SampledColor = {
-  r: number;
-  g: number;
-  b: number;
-};
-
 export async function exportAtsIncreasedPdf(
   originalBytes: ArrayBuffer,
   pdfDoc: PDFDocumentProxy,
@@ -153,7 +147,7 @@ export async function exportAtsIncreasedPdf(
         }
       }
 
-      drawBackgroundMatchedInsertions(
+      drawInvisibleInsertions(
         outputPage,
         pageInsertions,
         renderedPage,
@@ -323,14 +317,12 @@ function textItemToPdfRect(item: TextItem): PdfRect {
   };
 }
 
-function drawBackgroundMatchedInsertions(
+function drawInvisibleInsertions(
   outputPage: PDFPage,
   insertions: TextInsertion[],
   renderedPage: RenderedPage,
   font: PDFFont,
 ) {
-  const imageData = readCanvasPixels(renderedPage.canvas);
-
   for (const insertion of insertions) {
     const size = insertion.fontSize;
     const lineHeight = size * 1.2;
@@ -341,29 +333,25 @@ function drawBackgroundMatchedInsertions(
     const lines = getWrappedInsertionLines(insertion.text, font, size, maxWidth);
 
     lines.forEach((line, lineIndex) => {
-      drawBackgroundMatchedLine(
+      drawInvisibleLine(
         outputPage,
         line,
         x,
         firstBaseline - lineIndex * lineHeight,
         size,
         font,
-        renderedPage,
-        imageData,
       );
     });
   }
 }
 
-function drawBackgroundMatchedLine(
+function drawInvisibleLine(
   outputPage: PDFPage,
   line: string,
   x: number,
   y: number,
   size: number,
   font: PDFFont,
-  renderedPage: RenderedPage,
-  imageData: ImageData | null,
 ) {
   let cursor = x;
 
@@ -371,20 +359,19 @@ function drawBackgroundMatchedLine(
     const width = safeTextWidth(font, character, size);
 
     if (/\S/.test(character)) {
-      const color = sampleBackgroundColor(
-        renderedPage,
-        imageData,
-        cursor + width / 2,
-        y + size * 0.45,
-      );
-
       try {
+        // By setting opacity to 0, the text becomes perfectly transparent.
+        // This allows the background image to show through pixel-by-pixel,
+        // naturally blending with whatever is behind it (even if a character
+        // straddles two different background colors).
+        // It remains fully highlightable/selectable to ATS systems.
         outputPage.drawText(character, {
           x: cursor,
           y,
           size,
           font,
-          color: rgb(color.r / 255, color.g / 255, color.b / 255),
+          color: rgb(0, 0, 0),
+          opacity: 0,
         });
       } catch {
         // Standard fonts cannot encode every script; unsupported characters are skipped.
@@ -445,46 +432,6 @@ function safeTextWidth(font: PDFFont, text: string, size: number) {
   } catch {
     return size * 0.5;
   }
-}
-
-function readCanvasPixels(canvas: HTMLCanvasElement) {
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-
-  if (!context) {
-    return null;
-  }
-
-  try {
-    return context.getImageData(0, 0, canvas.width, canvas.height);
-  } catch {
-    return null;
-  }
-}
-
-function sampleBackgroundColor(
-  renderedPage: RenderedPage,
-  imageData: ImageData | null,
-  pdfX: number,
-  pdfY: number,
-): SampledColor {
-  if (!imageData) {
-    return { r: 255, g: 255, b: 255 };
-  }
-
-  const x = Math.round(
-    clamp(pdfX / renderedPage.widthPoints, 0, 1) * (imageData.width - 1),
-  );
-  const y = Math.round(
-    clamp(1 - pdfY / renderedPage.heightPoints, 0, 1) *
-      (imageData.height - 1),
-  );
-  const offset = (y * imageData.width + x) * 4;
-
-  return {
-    r: imageData.data[offset],
-    g: imageData.data[offset + 1],
-    b: imageData.data[offset + 2],
-  };
 }
 
 function invertIntervals(
