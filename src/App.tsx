@@ -791,13 +791,14 @@ export default function App() {
               <div className="panel-section">
                 <h2 className="panel-title">Choose Embed Mode</h2>
                 <p className="panel-desc">
-                  <strong>Manual</strong> — you type the keywords yourself.<br />
+                  <strong>Manual</strong> — you type the keywords yourself.
+                  {isLocalDev && <><br />
                   <strong>Automatic</strong> — paste a Job Description and AI finds the
-                  keywords missing from your resume.
+                  keywords missing from your resume.</>}
                 </p>
                 <div className="panel-actions">
                   <button className="btn" onClick={() => setWorkflowMode("manual")}>Manual</button>
-                  <button className="btn primary" onClick={() => setWorkflowMode("automatic")}>Automatic</button>
+                  {isLocalDev && <button className="btn primary" onClick={() => setWorkflowMode("automatic")}>Automatic</button>}
                 </div>
               </div>
             )}
