@@ -7,6 +7,8 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
+import { cloudflare } from "@cloudflare/vite-plugin";
+
 const OLLAMA_URL = "http://localhost:11434";
 const DEFAULT_MODEL = "qwen2.5:1.5b";
 
@@ -169,5 +171,5 @@ function pdfjsAssets(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), pdfjsAssets(), ollamaSetup()],
+  plugins: [react(), tailwindcss(), pdfjsAssets(), ollamaSetup(), cloudflare()],
 });
