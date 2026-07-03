@@ -17,6 +17,10 @@ import {
   Github,
   Linkedin,
   Laptop,
+  X,
+  Settings,
+  BrainCircuit,
+  Loader2,
 } from "lucide-react";
 import {
   ChangeEvent,
@@ -33,6 +37,7 @@ import { exportAtsIncreasedPdf } from "./pdfExport";
 import { pdfjsLib } from "./pdfWorker";
 import type { TextInsertion } from "./types";
 import { PdfPageView } from "./PdfPageView";
+import { findMissingKeywordsLLM } from "./textExtraction";
 
 type LoadState = "idle" | "loading" | "ready" | "saving" | "error";
 
@@ -76,6 +81,25 @@ export default function App() {
   const [insertions, setInsertions] = useState<TextInsertion[]>([]);
   const [activeInsertionId, setActiveInsertionId] = useState<string | null>(null);
   const [insertionMode, setInsertionMode] = useState(true);
+  const [workflowMode, setWorkflowMode] = useState<"prompt" | "manual" | "automatic">("prompt");
+  const [jdText, setJdText] = useState("");
+  const [jdProcessed, setJdProcessed] = useState(false);
+  const [embeddedKeywords, setEmbeddedKeywords] = useState<{ id: string; word: string }[]>([]);
+  
+  // API Key State
+  const [ollamaModel, setOllamaModel] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("ollama_model") || "qwen2.5:1.5b";
+    }
+    return "qwen2.5:1.5b";
+  });
+  const [apiSettingsOpen, setApiSettingsOpen] = useState(false);
+
+  // One-click local Ollama setup (dev only — see vite.config.ts).
+  const isLocalDev = import.meta.env.DEV;
+  const [setupRunning, setSetupRunning] = useState(false);
+  const [setupLog, setSetupLog] = useState("");
+
   const [state, setState] = useState<LoadState>("idle");
   const [message, setMessage] = useState("");
   const [zoom, setZoom] = useState(1);
@@ -262,6 +286,10 @@ export default function App() {
     setInsertionMode(true);
     setPdfDoc(null);
     setPdfFile(null);
+    setWorkflowMode("prompt");
+    setJdText("");
+    setJdProcessed(false);
+    setEmbeddedKeywords([]);
     setZoom(1);
     setCurrentPage(1);
     setPageInput("1");
@@ -274,6 +302,9 @@ export default function App() {
     try {
       const loadingTask = pdfjsLib.getDocument({
         url: objectUrl,
+        cMapUrl: "/cmaps/",
+        cMapPacked: true,
+        standardFontDataUrl: "/standard_fonts/",
       });
       const loadedPdf = await loadingTask.promise;
 
@@ -393,6 +424,10 @@ export default function App() {
     setInsertions([]);
     setActiveInsertionId(null);
     setInsertionMode(true);
+    setWorkflowMode("prompt");
+    setJdText("");
+    setJdProcessed(false);
+    setEmbeddedKeywords([]);
     setState("idle");
     setMessage("");
     setZoom(1);
@@ -401,6 +436,72 @@ export default function App() {
     setNearViewportPages(new Set());
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+  }
+
+  // ─── One-click local setup (dev only) ─────────────────
+  async function runOllamaSetup() {
+    setSetupRunning(true);
+    setSetupLog("Starting setup…\n");
+    try {
+      const res = await fetch("/api/ollama/setup", { method: "POST" });
+      if (!res.body) throw new Error("Setup endpoint is unavailable.");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        setSetupLog((prev) => prev + decoder.decode(value, { stream: true }));
+      }
+    } catch (e: any) {
+      setSetupLog((prev) => prev + "\nSetup failed: " + (e?.message || "Unknown error"));
+    } finally {
+      setSetupRunning(false);
+    }
+  }
+
+  // ─── Keyword Embedding ─────────────────────────────────
+  async function analyzeAndEmbed() {
+    if (!pdfDoc || !jdText.trim()) return;
+    
+    if (!ollamaModel.trim()) {
+      setApiSettingsOpen(true);
+      return;
+    }
+
+    setState("loading");
+    setMessage("Analyzing with local AI...");
+    try {
+      let fullPdfText = "";
+      for (let i = 1; i <= pdfDoc.numPages; i++) {
+        const page = await pdfDoc.getPage(i);
+        const textContent = await page.getTextContent();
+        fullPdfText += textContent.items.map((item: any) => item.str).join(" ") + " ";
+      }
+      
+      const missing = await findMissingKeywordsLLM(jdText, fullPdfText, ollamaModel);
+      if (missing.length === 0) {
+        setMessage("No new keywords found in JD.");
+        setTimeout(() => setMessage(""), 3000);
+        setState("ready");
+        setJdProcessed(true);
+        return;
+      }
+      
+      // Place keywords in empty space in/near the Skills section instead of
+      // dumping them over existing text.
+      const newInsertions = await findKeywordPlacements(pdfDoc, missing, 10);
+
+      setInsertions(current => [...current, ...newInsertions]);
+      setEmbeddedKeywords(newInsertions.map(ins => ({ id: ins.id, word: ins.text })));
+      setJdProcessed(true);
+      setMessage(`Added ${missing.length} keywords.`);
+      setTimeout(() => setMessage(""), 3000);
+      setState("ready");
+    } catch (e: any) {
+      console.error(e);
+      setMessage("Error analyzing PDF: " + (e.message || "Unknown error"));
+      setState("error");
     }
   }
 
@@ -626,7 +727,15 @@ export default function App() {
         )}
 
         <div className="top-bar-right">
-          {message && <span className="status-text">{message}</span>}
+            {message && <span className="status-text">{message}</span>}
+          <button
+            className="ctrl-btn"
+            onClick={() => setApiSettingsOpen(true)}
+            aria-label="Model Settings"
+            title="Model Settings"
+          >
+            <BrainCircuit size={16} strokeWidth={1.5} />
+          </button>
           <button
             className="ctrl-btn"
             onClick={() => setIsDark((prev) => !prev)}
@@ -676,7 +785,154 @@ export default function App() {
           </div>
         </main>
       ) : (
-        <main className="workspace">
+        <main className="workspace workspace-split">
+          <aside className="side-panel glass-panel">
+            {workflowMode === "prompt" && (
+              <div className="panel-section">
+                <h2 className="panel-title">Choose Embed Mode</h2>
+                <p className="panel-desc">
+                  <strong>Manual</strong> — you type the keywords yourself.<br />
+                  <strong>Automatic</strong> — paste a Job Description and AI finds the
+                  keywords missing from your resume.
+                </p>
+                <div className="panel-actions">
+                  <button className="btn" onClick={() => setWorkflowMode("manual")}>Manual</button>
+                  <button className="btn primary" onClick={() => setWorkflowMode("automatic")}>Automatic</button>
+                </div>
+              </div>
+            )}
+
+            {workflowMode === "manual" && (
+              <div className="panel-section">
+                <div className="panel-head">
+                  <h2 className="panel-title">Manual Mode</h2>
+                  <button className="btn ghost btn-sm" onClick={() => setWorkflowMode("prompt")}>Change</button>
+                </div>
+                <p className="panel-desc">Embed keywords by hand in a few steps:</p>
+                <ol className="panel-steps">
+                  <li>Click the <strong>Text tool</strong> (<Type size={13} strokeWidth={2} />) in the bottom dock.</li>
+                  <li>Click anywhere on the resume to drop a text box.</li>
+                  <li>Type the keyword(s) you want to embed.</li>
+                  <li>Press <strong>Process</strong> to lock them in — they turn invisible.</li>
+                  <li>Press <strong>Export</strong> to download the ATS-ready PDF.</li>
+                </ol>
+              </div>
+            )}
+
+            {workflowMode === "automatic" && !jdProcessed && (
+              <div className="panel-section">
+                <div className="panel-head">
+                  <h2 className="panel-title">Paste Job Description</h2>
+                  <button
+                    className="btn ghost btn-sm"
+                    onClick={() => setWorkflowMode("prompt")}
+                    disabled={state === "loading"}
+                  >
+                    Change
+                  </button>
+                </div>
+                <p className="panel-desc">
+                  We&apos;ll find skills in the JD that are missing from your resume and
+                  place them in the empty space near your Skills section.
+                </p>
+
+                {isLocalDev ? (
+                  <div className="setup-box">
+                    <button
+                      className="btn btn-block"
+                      onClick={runOllamaSetup}
+                      disabled={setupRunning}
+                    >
+                      {setupRunning ? (
+                        <><Loader2 size={15} className="spin" strokeWidth={2} /> Setting up…</>
+                      ) : (
+                        <><Download size={15} strokeWidth={2} /> Set up Automatic Mode</>
+                      )}
+                    </button>
+                    <small>Installs Ollama (if needed) &amp; downloads the AI model. One-time.</small>
+                    {setupLog && <pre className="setup-log">{setupLog}</pre>}
+                  </div>
+                ) : (
+                  <div className="setup-box notice">
+                    <strong>Automatic mode needs a local AI.</strong>
+                    <span>
+                      It runs Ollama on your own computer, so this hosted site can&apos;t do it
+                      for you. To use it, clone &amp; run the project locally (there&apos;s a
+                      one-click setup button), or run Ollama yourself. <strong>Manual mode
+                      works fully here.</strong>
+                    </span>
+                  </div>
+                )}
+
+                <textarea
+                  className="jd-input"
+                  placeholder="Paste the job description here..."
+                  value={jdText}
+                  onChange={(e) => setJdText(e.target.value)}
+                  disabled={state === "loading"}
+                />
+                <button
+                  className="btn primary btn-block"
+                  onClick={analyzeAndEmbed}
+                  disabled={!jdText.trim() || state === "loading"}
+                >
+                  {state === "loading" ? (
+                    <>
+                      <Loader2 size={16} className="spin" strokeWidth={2} /> Analyzing…
+                    </>
+                  ) : (
+                    "Analyze & Embed"
+                  )}
+                </button>
+                {state === "loading" && (
+                  <div className="progress-note">
+                    <div className="progress-bar">
+                      <span />
+                    </div>
+                    <p>{message || "Analyzing with local AI…"}</p>
+                    <small>Runs entirely on your machine — this may take a few seconds.</small>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {workflowMode === "automatic" && jdProcessed && (
+              <div className="panel-section">
+                <div className="panel-head">
+                  <h2 className="panel-title">Embedded Keywords</h2>
+                  <button className="btn ghost btn-sm" onClick={() => setJdProcessed(false)}>New JD</button>
+                </div>
+                {embeddedKeywords.some((kw) => insertions.some((ins) => ins.id === kw.id)) ? (
+                  <>
+                    <p className="panel-desc">
+                      Added near your Skills section. Remove any you don&apos;t want, then
+                      press <strong>Export</strong>.
+                    </p>
+                    <div className="keyword-list">
+                      {embeddedKeywords.map((kw) => {
+                        if (!insertions.some((ins) => ins.id === kw.id)) return null;
+                        return (
+                          <div key={kw.id} className="keyword-chip">
+                            <span>{kw.word}</span>
+                            <button
+                              className="btn icon-only btn-xs"
+                              onClick={() => removeInsertion(kw.id)}
+                              aria-label={`Remove ${kw.word}`}
+                            >
+                              <X size={12} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <p className="panel-desc">No new keywords were found in that job description.</p>
+                )}
+              </div>
+            )}
+          </aside>
+
           <div className="pdf-stack" ref={stackRef}>
             {pageNumbers.map((pageIndex) => (
               <PdfPageView
@@ -698,6 +954,31 @@ export default function App() {
               />
             ))}
           </div>
+
+          {apiSettingsOpen && (
+            <div style={{position: 'absolute', zIndex: 100, top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+              <div className="glass-panel" style={{padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1rem', width: '90%', maxWidth: '400px'}}>
+                <h2 style={{margin: 0, fontSize: '1.25rem'}}>Local Model Settings</h2>
+                <p style={{margin: 0, fontSize: '0.875rem', color: 'var(--text-muted)'}}>
+                  Enter the name of your local Ollama model. Fast, small options: "qwen2.5:1.5b", "llama3.2:1b", "qwen2.5:0.5b". Ensure Ollama is running with CORS enabled.
+                </p>
+                <input
+                  type="text"
+                  className="insertion-input"
+                  style={{padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)'}}
+                  placeholder="qwen2.5:1.5b"
+                  value={ollamaModel}
+                  onChange={(e) => {
+                    setOllamaModel(e.target.value);
+                    localStorage.setItem("ollama_model", e.target.value);
+                  }}
+                />
+                <div style={{display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem'}}>
+                  <button className="btn primary" onClick={() => setApiSettingsOpen(false)}>Done</button>
+                </div>
+              </div>
+            </div>
+          )}
         </main>
       )}
 
@@ -772,4 +1053,121 @@ function clampPage(page: number, totalPages: number) {
   }
 
   return Math.min(Math.max(Math.trunc(page), 1), totalPages);
+}
+
+// Normalized (0..1, origin at top-left) rectangle used for placement checks.
+type LayoutRect = { left: number; top: number; right: number; bottom: number };
+
+/**
+ * Finds positions for auto-embedded keywords that (a) sit in empty space where
+ * no existing text lives, and (b) are located in or just below the Skills
+ * section. Falls back to the top of the first page if no Skills heading is found.
+ */
+async function findKeywordPlacements(
+  pdfDoc: PDFDocumentProxy,
+  words: string[],
+  fontSize: number,
+): Promise<TextInsertion[]> {
+  const pages: { width: number; height: number; rects: LayoutRect[] }[] = [];
+  let skillsPage = -1;
+  let skillsTop = 0;
+
+  for (let i = 1; i <= pdfDoc.numPages; i += 1) {
+    const page = await pdfDoc.getPage(i);
+    const viewport = page.getViewport({ scale: 1 });
+    const width = viewport.width;
+    const height = viewport.height;
+    const content = await page.getTextContent();
+    const rects: LayoutRect[] = [];
+
+    for (const item of content.items as any[]) {
+      if (typeof item.str !== "string" || item.str.trim().length === 0) {
+        continue;
+      }
+
+      const x = Number(item.transform[4]);
+      const y = Number(item.transform[5]);
+      const w = Number(item.width) || 0;
+      const h = Math.max(Number(item.height) || Number(item.transform[3]) || 8, 4);
+      const rect: LayoutRect = {
+        left: x / width,
+        right: (x + w) / width,
+        top: (height - (y + h)) / height,
+        bottom: (height - y) / height,
+      };
+      rects.push(rect);
+
+      // Match a standalone Skills section heading (e.g. "SKILLS",
+      // "Technical Skills") — not phrases like "Technologies / Skills Used:".
+      if (skillsPage === -1 && /^(technical\s+|core\s+|key\s+)?skills?(\s*&\s*tools)?$/i.test(item.str.trim())) {
+        skillsPage = i - 1;
+        skillsTop = rect.top;
+      }
+    }
+
+    pages.push({ width, height, rects });
+    page.cleanup();
+  }
+
+  const targetPage = skillsPage === -1 ? 0 : skillsPage;
+  const { width, height, rects } = pages[targetPage];
+  const startY = skillsPage === -1 ? 0.06 : Math.min(skillsTop + 0.005, 0.97);
+
+  const boxHeight = Math.max((fontSize * 1.25) / height, 0.02);
+  const pad = 0.004;
+  const occupied: LayoutRect[] = [...rects];
+  const results: TextInsertion[] = [];
+  let fallbackY = startY;
+
+  const isFree = (box: LayoutRect) =>
+    box.right <= 0.98 &&
+    box.bottom <= 0.98 &&
+    !occupied.some(
+      (r) =>
+        box.left < r.right + pad &&
+        box.right > r.left - pad &&
+        box.top < r.bottom + pad &&
+        box.bottom > r.top - pad,
+    );
+
+  const push = (word: string, x: number, y: number, boxWidth: number) => {
+    const rect: LayoutRect = { left: x, top: y, right: x + boxWidth, bottom: y + boxHeight };
+    occupied.push(rect);
+    results.push({
+      id: crypto.randomUUID(),
+      pageIndex: targetPage,
+      x,
+      y,
+      width: boxWidth,
+      height: boxHeight,
+      text: word,
+      fontSize,
+      status: "draft",
+    });
+  };
+
+  for (const word of words) {
+    // Rough Helvetica width estimate for the keyword, with slack so the text
+    // stays on one line and isn't clipped.
+    const boxWidth = Math.min(0.9, Math.max(0.08, ((word.length + 2) * fontSize * 0.6) / width));
+    let placed = false;
+
+    for (let py = startY; py <= 0.98 - boxHeight && !placed; py += boxHeight * 0.6) {
+      for (let px = 0.03; px <= 0.98 - boxWidth && !placed; px += 0.02) {
+        const box: LayoutRect = { left: px, top: py, right: px + boxWidth, bottom: py + boxHeight };
+        if (isFree(box)) {
+          push(word, px, py, boxWidth);
+          placed = true;
+        }
+      }
+    }
+
+    if (!placed) {
+      // No free gap near Skills — stack downward as a last resort.
+      push(word, 0.03, Math.min(0.96, fallbackY), boxWidth);
+      fallbackY += boxHeight * 1.3;
+    }
+  }
+
+  return results;
 }
