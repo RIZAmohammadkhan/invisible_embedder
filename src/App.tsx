@@ -728,14 +728,14 @@ export default function App() {
 
         <div className="top-bar-right">
             {message && <span className="status-text">{message}</span>}
-          <button
+          {isLocalDev && <button
             className="ctrl-btn"
             onClick={() => setApiSettingsOpen(true)}
             aria-label="Model Settings"
             title="Model Settings"
           >
             <BrainCircuit size={16} strokeWidth={1.5} />
-          </button>
+          </button>}
           <button
             className="ctrl-btn"
             onClick={() => setIsDark((prev) => !prev)}
@@ -789,17 +789,32 @@ export default function App() {
           <aside className="side-panel glass-panel">
             {workflowMode === "prompt" && (
               <div className="panel-section">
-                <h2 className="panel-title">Choose Embed Mode</h2>
-                <p className="panel-desc">
-                  <strong>Manual</strong> — you type the keywords yourself.
-                  {isLocalDev && <><br />
-                  <strong>Automatic</strong> — paste a Job Description and AI finds the
-                  keywords missing from your resume.</>}
-                </p>
-                <div className="panel-actions">
-                  <button className="btn" onClick={() => setWorkflowMode("manual")}>Manual</button>
-                  {isLocalDev && <button className="btn primary" onClick={() => setWorkflowMode("automatic")}>Automatic</button>}
-                </div>
+                {isLocalDev ? (
+                  <>
+                    <h2 className="panel-title">Choose Embed Mode</h2>
+                    <p className="panel-desc">
+                      <strong>Manual</strong> — you type the keywords yourself.<br />
+                      <strong>Automatic</strong> — paste a Job Description and AI finds the
+                      keywords missing from your resume.
+                    </p>
+                    <div className="panel-actions">
+                      <button className="btn" onClick={() => setWorkflowMode("manual")}>Manual</button>
+                      <button className="btn primary" onClick={() => setWorkflowMode("automatic")}>Automatic</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="panel-title">Manual Mode</h2>
+                    <p className="panel-desc">Embed keywords by hand in a few steps:</p>
+                    <ol className="panel-steps">
+                      <li>Click the <strong>Text tool</strong> (<Type size={13} strokeWidth={2} />) in the bottom dock.</li>
+                      <li>Click anywhere on the resume to drop a text box.</li>
+                      <li>Type the keyword(s) you want to embed.</li>
+                      <li>Press <strong>Process</strong> to lock them in — they turn invisible.</li>
+                      <li>Press <strong>Export</strong> to download the ATS-ready PDF.</li>
+                    </ol>
+                  </>
+                )}
               </div>
             )}
 
@@ -807,7 +822,7 @@ export default function App() {
               <div className="panel-section">
                 <div className="panel-head">
                   <h2 className="panel-title">Manual Mode</h2>
-                  <button className="btn ghost btn-sm" onClick={() => setWorkflowMode("prompt")}>Change</button>
+                  {isLocalDev && <button className="btn ghost btn-sm" onClick={() => setWorkflowMode("prompt")}>Change</button>}
                 </div>
                 <p className="panel-desc">Embed keywords by hand in a few steps:</p>
                 <ol className="panel-steps">
